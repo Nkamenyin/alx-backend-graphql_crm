@@ -1,1 +1,5 @@
 django-crontab
+Django>=5.0
+django-crontab
+gql
+requests
