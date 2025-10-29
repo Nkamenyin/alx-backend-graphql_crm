@@ -1,36 +1,43 @@
 import graphene
-from graphene_django import DjangoObjectType
-from .models import Product
-from datetime import datetime
+from crm.models import Product
 
-# --- Define Product Type ---
-class ProductType(DjangoObjectType):
-    class Meta:
-        model = Product
-        fields = ("id", "name", "stock")
 
-# --- Define Mutation ---
+class ProductType(graphene.ObjectType):
+    id = graphene.ID()
+    name = graphene.String()
+    stock = graphene.Int()
+
+
 class UpdateLowStockProducts(graphene.Mutation):
-    class Arguments:
-        pass  # No input arguments needed
+    class Output(graphene.ObjectType):
+        message = graphene.String()
+        updated_products = graphene.List(ProductType)
 
-    updated_products = graphene.List(ProductType)
-    message = graphene.String()
-
-    @classmethod
-    def mutate(cls, root, info):
+    def mutate(self, info):
+        # Query products with stock < 10
         low_stock_products = Product.objects.filter(stock__lt=10)
         updated_products = []
 
+        # Update (restock) each product
         for product in low_stock_products:
-            product.stock += 10  # simulate restock
+            product.stock += 10
             product.save()
             updated_products.append(product)
 
-        msg = f"{datetime.now().strftime('%d/%m/%Y %H:%M:%S')} — {len(updated_products)} products restocked."
-        return UpdateLowStockProducts(updated_products=updated_products, message=msg)
+        message = f"{len(updated_products)} product(s) restocked."
+
+        return UpdateLowStockProducts.Output(
+            message=message,
+            updated_products=updated_products
+        )
 
 
-# --- Root Mutation ---
 class Mutation(graphene.ObjectType):
     update_low_stock_products = UpdateLowStockProducts.Field()
+
+
+class Query(graphene.ObjectType):
+    hello = graphene.String(default_value="Hello, CRM!")
+
+
+schema = graphene.Schema(query=Query, mutation=Mutation)
