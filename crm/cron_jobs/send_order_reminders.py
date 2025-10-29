@@ -1,60 +1,61 @@
-#!/usr/bin/env python3
-"""
-send_order_reminders.py
-------------------------
-Fetches orders from the GraphQL endpoint that were placed within the last 7 days
-and logs each order’s ID and customer email with a timestamp.
-"""
+from datetime import datetime, timedelta
+from gql import gql, Client
+from gql.transport.requests import RequestsHTTPTransport
+import os
 
-import requests
-import datetime
-
-# GraphQL endpoint
-GRAPHQL_URL = "http://localhost:8000/graphql"
-
-# Log file
-LOG_FILE = "/tmp/order_reminders_log.txt"
-
-# Define the GraphQL query
-query = """
-query RecentOrders($since: DateTime!) {
-  orders(orderDate_Gte: $since) {
-    id
-    customer {
-      email
-    }
-  }
-}
-"""
-
-def fetch_recent_orders():
-    """Fetch orders placed within the last 7 days using GraphQL."""
-    seven_days_ago = (datetime.datetime.now() - datetime.timedelta(days=7)).isoformat()
-
-    # Define variables for the query
-    payload = {
-        "query": query,
-        "variables": {"since": seven_days_ago}
-    }
-
-    response = requests.post(GRAPHQL_URL, json=payload)
-
-    if response.status_code != 200:
-        raise Exception(f"Query failed with status {response.status_code}: {response.text}")
-
-    return response.json()["data"]["orders"]
-
-def log_orders(orders):
-    """Log orders to a file with timestamps."""
-    with open(LOG_FILE, "a") as log_file:
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        for order in orders:
-            log_file.write(f"[{timestamp}] Order ID: {order['id']}, Customer: {order['customer']['email']}\n")
+# Define GraphQL endpoint
+GRAPHQL_ENDPOINT = "http://localhost:8000/graphql"
 
 def main():
-    orders = fetch_recent_orders()
-    log_orders(orders)
-    print("Order reminders processed!")
+    # 1. Calculate date range (last 7 days)
+    today = datetime.now()
+    seven_days_ago = today - timedelta(days=7)
+    start_date = seven_days_ago.strftime("%Y-%m-%d")
+
+    # 2. Configure GraphQL client
+    transport = RequestsHTTPTransport(
+        url=GRAPHQL_ENDPOINT,
+        verify=False,
+        retries=3,
+    )
+    client = Client(transport=transport, fetch_schema_from_transport=True)
+
+    # 3. Define GraphQL query
+    query = gql(
+        """
+        query GetRecentOrders($startDate: Date!) {
+            orders(filter: { orderDate_Gte: $startDate }) {
+                id
+                customer {
+                    email
+                }
+            }
+        }
+        """
+    )
+
+    # 4. Execute query
+    try:
+        result = client.execute(query, variable_values={"startDate": start_date})
+        orders = result.get("orders", [])
+
+        # 5. Log to file
+        log_file = "/tmp/order_reminders_log.txt"
+        with open(log_file, "a") as f:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"\n--- Order reminder run at {timestamp} ---\n")
+            if orders:
+                for order in orders:
+                    order_id = order["id"]
+                    customer_email = order["customer"]["email"]
+                    f.write(f"Order ID: {order_id}, Email: {customer_email}\n")
+            else:
+                f.write("No recent orders found.\n")
+
+        print("Order reminders processed!")
+
+    except Exception as e:
+        print(f"Error fetching orders: {e}")
 
 if __name__ == "__main__":
     main()
